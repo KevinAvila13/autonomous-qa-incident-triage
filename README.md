@@ -56,7 +56,7 @@ graph TD
        "payload": {
          "transaction_id": "TX_TIMEOUT_99",
          "amount": 150.00,
-         "provider": "Yalutec_Pay_Gateway"
+         "provider": "Pay_Gateway"
        }
      }'
    ```
