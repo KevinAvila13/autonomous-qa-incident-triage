@@ -1,0 +1,337 @@
+{
+  "name": "Autonomous Incident Triage Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "incident-alert",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "c2927a10-9f00-4337-b483-05eb43bb11f6",
+      "name": "Webhook",
+      "webhookId": "6bc0f2b3-d789-4130-adbd-399267274e48"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "google/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "google/gemini-2.5-flash"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        128,
+        208
+      ],
+      "id": "936b432a-f2cc-4a7d-b5bf-404fe0d165a1",
+      "name": "OpenAI Chat Model1",
+      "notesInFlow": false,
+      "credentials": {
+        "openAiApi": {
+          "id": "rs0lid7GjdOV1aaR",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($('Webhook').item.json.body) }}",
+        "options": {
+          "systemMessage": "Eres un Agente de QA L1 especializado en análisis de incidentes de API e integraciones distribuidas.\n\nTu objetivo:\n1. Analizar el payload del incidente recibido por el webhook.\n2. Extraer los datos clave (endpoint, parámetros, ID de transacción, código de error reportado).\n3. Determinar qué endpoint de la API debe ser probado para verificar si el problema persiste.\n4. Clasificar la falla en una de estas categorías:\n   - CRITICAL_SYSTEM_ERROR (Base de datos, timeouts de infraestructura)\n   - BAD_REQUEST_PAYLOAD (Error de cliente, JSON malformado)\n   - SERVICE_UNAVAILABLE (Falla en pasarelas/proveedores externos)\n\nResponde SIEMPRE en formato JSON estructurado con la siguiente forma:\n{\n  \"incident_id\": \"<ID extraído o generado>\",\n  \"reproduction_target_url\": \"<URL completa para hacer cURL/GET/POST>\",\n  \"http_method\": \"GET\" | \"POST\",\n  \"test_payload\": { ... },\n  \"initial_classification\": \"<Categoría>\",\n  \"reasoning\": \"<Explicación técnica en 2 oraciones de qué causó el fallo>\"\n}\n\nREGLA 1 - FORMATO ESTRICTO: Tu respuesta debe ser ÚNICAMENTE un objeto JSON válido. NO uses bloques de código (```json) ni formato Markdown. Solo devuelve el texto del JSON puro.\n\nREGLA 2 - URL DE PRUEBA: NUNCA uses dominios reales ni URLs de producción/staging (como staging.osigu.com). Para el campo \"reproduction_target_url\", SIEMPRE construye la URL apuntando a tu entorno local usando esta IP estricta: [http://172.17.0.1:3000](http://172.17.0.1:3000) seguida de la ruta correspondiente."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "49621130-9c2a-4e32-88ce-b1e547877368",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "method": "={{ JSON.parse($json.output).http_method }}",
+        "url": "{{ JSON.parse($json.output).reproduction_target_url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        576,
+        0
+      ],
+      "id": "42fa6a92-876e-4c54-9270-799f25aa8c98",
+      "name": "HTTP Request",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM authorizations \nWHERE id = '{{ JSON.parse($json.output).incident_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        720,
+        -144
+      ],
+      "id": "33dc242b-3b77-4846-b018-caf8f6fef3a8",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "GTrzhvs93NmDFd7B",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($('Webhook').item.json.body) }}",
+        "options": {
+          "systemMessage": "Eres un Agente de QA L2/L3 y SRE experto en análisis de causa raíz (Root Cause Analysis).\n\nTu objetivo:\nAnalizar la información combinada del Incidente L1 y los registros recuperados de la Base de Datos PostgreSQL.\n\nAcciones de Triaje:\n1. Inspeccionar el campo `error_log` y el estado del registro.\n2. Determinar la acción correctiva recomendada:\n   - RESTART_CONNECTION_POOL (Si es agotamiento de conexiones en DB).\n   - MANUAL_RETRY_TRANSACTION (Si el registro quedó colgado en PENDING por timeout de pasarela).\n   - ESCALATE_TO_DEV (Si es un bug de código no manejado).\n\nResponde SIEMPRE en formato JSON estructurado:\n{\n  \"incident_id\": \"<ID del incidente>\",\n  \"root_cause_summary\": \"<Resumen técnico detallado>\",\n  \"database_status\": \"<Status recuperado de la BD>\",\n  \"recommended_action\": \"RESTART_CONNECTION_POOL\" | \"MANUAL_RETRY_TRANSACTION\" | \"ESCALATE_TO_DEV\",\n  \"requires_hotfix\": true | false\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        912,
+        -160
+      ],
+      "id": "d3d604fa-8687-4d74-b0f6-233e704fa456",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "google/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "google/gemini-2.5-flash"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        784,
+        48
+      ],
+      "id": "b79de0a1-4bf2-4f15-ad4b-40b216e658b8",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "rs0lid7GjdOV1aaR",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($('Webhook').item.json.body) }}",
+        "options": {
+          "systemMessage": "Eres un Agente L3 de QA Engineering & Incident Management.\n\nTu trabajo es tomar el diagnóstico técnico entregado por el Agente L2 y generar un reporte de incidente listo para producción en formato Markdown para Slack/Jira.\n\nEl reporte debe incluir:\n1. Header con estado y severidad (🚨 CRITICAL / ⚠️ WARNING / ℹ️ INFO).\n2. Resumen Ejecutivo (Root Cause).\n3. Detalles del Sistema (ID de transacción, estado en BD, servicio afectado).\n4. Acción Recomendada para el equipo de Guardias SRE/QA.\n5. Comando cURL o script sugerido para reintentar/reproducir la falla.\n\nResponde ÚNICAMENTE con el bloque Markdown formateado de forma limpia y profesional."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1280,
+        -160
+      ],
+      "id": "3ccd31cc-6207-4f83-a6b0-0ed0f6abc2ca",
+      "name": "AI Agent2"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "google/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "google/gemini-2.5-flash"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1152,
+        48
+      ],
+      "id": "a9f103ea-5bd8-4fd1-850e-b340c063d41e",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "rs0lid7GjdOV1aaR",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#alerts_n8n_qa",
+          "mode": "name"
+        },
+        "text": "=={{ $json.output }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1616,
+        -160
+      ],
+      "id": "b2177870-c6ad-4e32-9f4c-4ca0ef6f3cc6",
+      "name": "Send a message",
+      "webhookId": "c38fd0bd-0c7c-4560-a9d2-d382784441b6",
+      "credentials": {
+        "slackApi": {
+          "id": "nNmnix47kZiqRum7",
+          "name": "Slack account 3"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent2": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent2",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "48ea35e5-730e-493f-a44d-90c5ab91b223",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1a3b0115ab767c147006e30786d040213cdb241a6f365faaa34e7f076473608b"
+  },
+  "nodeGroups": [],
+  "id": "fQGckL6O4FEzv8ou",
+  "tags": []
+}
