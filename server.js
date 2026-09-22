@@ -22,7 +22,7 @@ app.post('/api/v1/payments/process', (req, res) => {
   if (transaction_id === 'TX_TIMEOUT_99') {
     return res.status(504).json({
       error: 'GatewayTimeout',
-      provider: 'Yalutec_Pay_Gateway',
+      provider: 'Pay_Gateway',
       message: 'External provider service did not respond within 5000ms threshold',
       timestamp: new Date().toISOString()
     });
@@ -46,7 +46,7 @@ const N8N_WEBHOOK_URL = 'http://localhost:5678/webhook-test/incident-alert';
       body: JSON.stringify({
         event: 'INCIDENT_DETECTED',
         incident_type,
-        service: 'Osigu_Authorization_Engine',
+        service: 'Authorization_Engine',
         environment: 'staging',
         details: payload,
         timestamp: new Date().toISOString()

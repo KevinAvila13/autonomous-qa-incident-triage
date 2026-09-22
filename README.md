@@ -60,3 +60,11 @@ graph TD
        }
      }'
    ```
+
+   ## 📸 Execution Showcase
+
+### n8n Autonomous Workflow
+![n8n Workflow](./assets/n8n-canvas.png)
+
+### Real-Time Slack Incident Alert
+![Slack Alert](./assets/slack-output.png)
